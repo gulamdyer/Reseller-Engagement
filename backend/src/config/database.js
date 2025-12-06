@@ -12,12 +12,71 @@ oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT; // Return query results as obje
 oracledb.autoCommit = false; // Explicit transaction control
 
 let pool = null;
+let isThickModeInitialized = false;
+
+/**
+ * Initialize Oracle Client in thick mode
+ * REQUIRED for databases with Native Network Encryption
+ */
+async function initOracleThickMode() {
+  if (isThickModeInitialized) {
+    return;
+  }
+
+  try {
+    const libDir = config.oracle.clientLibDir;
+    const tnsAdmin = config.oracle.tnsAdmin;
+
+    // Set TNS_ADMIN environment variable if specified
+    if (tnsAdmin) {
+      process.env.TNS_ADMIN = tnsAdmin;
+      logger.info('Setting TNS_ADMIN', { tnsAdmin });
+    }
+
+    if (libDir) {
+      logger.info('Initializing Oracle Thick mode', { libDir });
+      const initOptions = { libDir };
+      if (tnsAdmin) {
+        initOptions.configDir = tnsAdmin;
+      }
+      oracledb.initOracleClient(initOptions);
+      logger.info('Oracle Thick mode initialized successfully');
+    } else {
+      logger.info('Initializing Oracle Thick mode (auto-detect)');
+      oracledb.initOracleClient();
+      logger.info('Oracle Thick mode initialized successfully');
+    }
+
+    isThickModeInitialized = true;
+  } catch (error) {
+    // NJS-077: Oracle client already initialized (not an error)
+    if (error.message && error.message.includes('NJS-077')) {
+      logger.info('Oracle client already initialized');
+      isThickModeInitialized = true;
+      return;
+    }
+
+    // DPI-1047: Oracle Client libraries not found
+    if (error.message && error.message.includes('DPI-1047')) {
+      throw new Error(
+        'Oracle Client libraries not found. Please install Oracle Instant Client and set ORACLE_CLIENT_LIB_DIR in .env\n' +
+        'Download from: https://www.oracle.com/database/technologies/instant-client/downloads.html'
+      );
+    }
+
+    logger.error('Oracle Thick mode initialization failed', { error: error.message });
+    throw error;
+  }
+}
 
 /**
  * Initialize Oracle connection pool
  */
 async function initializePool() {
   try {
+    // Initialize thick mode BEFORE creating pool
+    await initOracleThickMode();
+
     pool = await oracledb.createPool({
       user: config.oracle.user,
       password: config.oracle.password,
@@ -32,7 +91,7 @@ async function initializePool() {
     logger.info('Oracle connection pool initialized successfully', {
       poolMin: config.oracle.poolMin,
       poolMax: config.oracle.poolMax,
-      connectString: config.oracle.connectString.replace(/\/\/.*@/, '//*****@'), // Hide credentials
+      connectString: config.oracle.connectString,
     });
 
     return pool;

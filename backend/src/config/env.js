@@ -19,6 +19,8 @@ const config = {
     poolMax: parseInt(process.env.ORACLE_POOL_MAX || '10', 10),
     poolIncrement: parseInt(process.env.ORACLE_POOL_INCREMENT || '1', 10),
     poolTimeout: parseInt(process.env.ORACLE_POOL_TIMEOUT || '60', 10),
+    clientLibDir: process.env.ORACLE_CLIENT_LIB_DIR, // Path to Oracle Instant Client (for thick mode)
+    tnsAdmin: process.env.TNS_ADMIN, // Path to TNS configuration (optional)
   },
 
   // Authentication Configuration

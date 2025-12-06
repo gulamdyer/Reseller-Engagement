@@ -29,7 +29,7 @@ async function getResellers(filters = {}) {
         CREDIT_LIMIT,
         CREATED_DATE,
         LAST_MODIFIED_DATE
-      FROM SPINE_RESELLER
+      FROM SALR_E_RESELLER_VIEW
       WHERE 1=1
     `;
 
@@ -86,7 +86,7 @@ async function getResellerById(resellerId) {
         OUTSTANDING_BALANCE,
         CREATED_DATE,
         LAST_MODIFIED_DATE
-      FROM SPINE_RESELLER
+      FROM SALR_E_RESELLER_VIEW
       WHERE RESELLER_ID = :resellerId
     `;
 
@@ -112,7 +112,7 @@ async function getResellerByWhatsApp(whatsappNumber) {
         WHATSAPP_NUMBER,
         EMAIL,
         STATUS
-      FROM SPINE_RESELLER
+      FROM SALR_E_RESELLER_VIEW
       WHERE WHATSAPP_NUMBER = :whatsappNumber
         AND STATUS = 'ACTIVE'
     `;
@@ -137,18 +137,16 @@ async function getResellersWithActivity(filters = {}) {
         r.REGION,
         r.STATUS,
         r.WHATSAPP_NUMBER,
-        (SELECT MAX(ORDER_DATE)
-         FROM SPINE_SALES_ORDER so
-         WHERE so.RESELLER_ID = r.RESELLER_ID) AS LAST_ORDER_DATE,
+        r.LAST_ORDER_DATE,
         (SELECT COUNT(*)
-         FROM SPINE_SALES_ORDER so
-         WHERE so.RESELLER_ID = r.RESELLER_ID
-           AND so.ORDER_DATE >= ADD_MONTHS(SYSDATE, -12)) AS ORDERS_LAST_12M,
-        (SELECT SUM(TOTAL_AMOUNT)
-         FROM SPINE_INVOICE inv
-         WHERE inv.RESELLER_ID = r.RESELLER_ID
-           AND inv.INVOICE_DATE >= ADD_MONTHS(SYSDATE, -12)) AS SALES_LAST_12M
-      FROM SPINE_RESELLER r
+         FROM SALE_T_ORDER_HEAD so
+         WHERE so.OH_CUST_ID = r.RESELLER_CODE
+           AND so.OH_TXN_DT >= ADD_MONTHS(SYSDATE, -12)) AS ORDERS_LAST_12M,
+        (SELECT SUM(IH_NET_VALUE_LC)
+         FROM SALE_T_INV_HEAD inv
+         WHERE inv.IH_CUST_ID = r.RESELLER_CODE
+           AND inv.IH_TXN_DT >= ADD_MONTHS(SYSDATE, -12)) AS SALES_LAST_12M
+      FROM SALR_E_RESELLER_VIEW r
       WHERE r.STATUS = 'ACTIVE'
     `;
 
@@ -175,8 +173,8 @@ async function getResellersWithActivity(filters = {}) {
 async function getLastOrderDateForReseller(resellerId) {
   try {
     const sql = `
-      SELECT MAX(ORDER_DATE) AS LAST_ORDER_DATE
-      FROM SPINE_SALES_ORDER
+      SELECT LAST_ORDER_DATE
+      FROM SALR_E_RESELLER_VIEW
       WHERE RESELLER_ID = :resellerId
     `;
 
@@ -195,18 +193,19 @@ async function getSalesForResellerInPeriod(resellerId, fromDate, toDate) {
   try {
     const sql = `
       SELECT
-        inv.INVOICE_ID,
-        inv.INVOICE_NO,
-        inv.INVOICE_DATE,
-        inv.TOTAL_AMOUNT,
-        inv.TAX_AMOUNT,
-        inv.NET_AMOUNT,
-        inv.STATUS
-      FROM SPINE_INVOICE inv
-      WHERE inv.RESELLER_ID = :resellerId
-        AND inv.INVOICE_DATE >= :fromDate
-        AND inv.INVOICE_DATE <= :toDate
-      ORDER BY inv.INVOICE_DATE DESC
+        inv.IH_SYS_ID INVOICE_ID,
+        inv.IH_TXN_NO INVOICE_NO,
+        inv.IH_TXN_DT INVOICE_DATE,
+        inv.IH_GROSS_VALUE_LC TOTAL_AMOUNT,
+        inv.IH_TAX_VALUE TAX_AMOUNT,
+        inv.IH_GROSS_VALUE_LC,
+        inv.IH_STATUS
+      FROM SALE_T_INV_HEAD inv, r.SALR_E_RESELLER_VIEW
+      WHERE inv.IH_CUST_ID = r.RESELLER_CODE 
+	    AND r.RESELLER_ID = :resellerId
+        AND inv.IH_TXN_DT >= :fromDate
+        AND inv.IH_TXN_DT <= :toDate
+      ORDER BY inv.IH_TXN_DT DESC
     `;
 
     const result = await db.queryAll(sql, { resellerId, fromDate, toDate });
@@ -230,13 +229,14 @@ async function getTotalSalesForReseller(resellerId, fromDate, toDate) {
     const sql = `
       SELECT
         COUNT(*) AS INVOICE_COUNT,
-        SUM(TOTAL_AMOUNT) AS TOTAL_SALES,
-        SUM(NET_AMOUNT) AS NET_SALES
-      FROM SPINE_INVOICE
-      WHERE RESELLER_ID = :resellerId
-        AND INVOICE_DATE >= :fromDate
-        AND INVOICE_DATE <= :toDate
-        AND STATUS IN ('POSTED', 'PAID')
+        SUM(IH_GROSS_VALUE_LC) AS TOTAL_SALES,
+        SUM(IH_NET_VALUE_LC) AS NET_SALES
+      FROM SALE_T_INV_HEAD inv, r.SALR_E_RESELLER_VIEW
+      WHERE inv.IH_CUST_ID = r.RESELLER_CODE 
+	    AND r.RESELLER_ID = :resellerId
+        AND inv.IH_TXN_DT >= :fromDate
+        AND inv.IH_TXN_DT <= :toDate
+        AND inv.IH_STATUS ='Approved'
     `;
 
     const result = await db.queryOne(sql, { resellerId, fromDate, toDate });
@@ -254,16 +254,16 @@ async function getSKUs(filters = {}) {
   try {
     let sql = `
       SELECT
-        SKU_ID,
-        SKU_CODE,
-        SKU_NAME,
-        CATEGORY,
-        UNIT_PRICE,
-        STOCK_QTY,
-        REORDER_LEVEL,
-        STATUS
-      FROM SPINE_SKU
-      WHERE STATUS = 'ACTIVE'
+        ITEM_CODE SKU_ID,
+        ITEM_ID SKU_CODE,
+        ITEM_NAME SKU_NAME,
+        NULL CATEGORY,
+        0 UNIT_PRICE,
+        0 STOCK_QTY,
+        0 REORDER_LEVEL,
+        ITEM_ST_CODE STATUS
+      FROM INVT_M_ITEM
+      WHERE ITEM_ACTIVE_YN='Y'
     `;
 
     const binds = {};
